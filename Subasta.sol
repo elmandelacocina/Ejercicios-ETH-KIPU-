@@ -1,147 +1,147 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-/// Subasta Dinámica con Extensión y Reembolsos Parciales
-/// Permite ofertar por un artículo, extendiendo el tiempo final con cada nueva oferta válida.
+/// @title Dynamic Auction with Extension and Partial Refunds
+/// @notice Allows bidding on an item, extending the end time with each valid new bid.
 
-contract Subasta {
-    /// @notice Dirección del dueño de la subasta
+contract Auction {
+    /// @notice Address of the auction owner
     address public immutable owner;
 
-    ///  @notice Marca el inicio de la subasta (timestamp)
-    uint256 public immutable inicioTiempo;
+    /// @notice Marks the start of the auction (timestamp)
+    uint256 public immutable startTime;
 
-    /// @notice  Marca el final original de la subasta (timestamp)
-    uint256 public immutable setTiempoFinal;
+    /// @notice Marks the original end time of the auction (timestamp)
+    uint256 public immutable setFinalTime;
 
-    /// @notice Marca el final actualizado de la subasta (timestamp)
-    uint256 public tiempoActualizado;
+    /// @notice Marks the updated end time of the auction (timestamp)
+    uint256 public timeUpdated;
 
-    /// @notice Dirección del ofertante con la oferta más alta
-    address public mayorOfertante;
+    /// @notice Address of the bidder with the highest bid
+    address public highBidder;
 
-    /// @notice Valor de la oferta más alta
-    uint256 public mayorOferta;
+    /// @notice Value of the highest bid
+    uint256 public highBid;
 
-    /// @notice Indica si la subasta ya fue finalizada
+    /// @notice Indicates whether the auction has been finalized
     bool public ended;
 
-    /// @notice Comisión de reembolso: 2% para ofertantes no ganadores
-    uint256 public constant comision = 200; // 2% en basis points (1% = 100bps)
+    /// @notice Refund fee: 2% for non-winning bidders
+    uint256 public constant comision = 200; // 2% in basis points (1% = 100 bps)
 
-    /// @notice Mapeo de las ofertas por dirección
+    /// @notice Mapping of bids by address
     mapping(address => uint256) public bids;
 
-    /// @notice Lista de ofertantes únicos
-    address[] public ofertantes;
+    /// @notice List of unique bidders
+    address[] public bidders;
 
-    /// @notice Evento emitido al realizar una nueva oferta válida
-    event NuevaOferta(address indexed ofertante, uint256 amount, uint256 nuevotiempoActualizado);
+    /// @notice Emitted when a new valid bid is placed
+    event newBid(address indexed bidder, uint256 amount, uint256 newtimeUpdated);
 
-    /// @notice Evento emitido al finalizar la subasta
-    event SubastaFinalizada(address ganador, uint256 amount);
+    /// @notice Emitted when the auction is finalized
+    event endedBid(address winner, uint256 amount);
 
-    /// @notice Modificador para restringir acceso al dueño
+    /// @notice Modifier to restrict access to the owner
     modifier onlyOwner() {
-        require(msg.sender == owner, "Solo el dueno puede ejecutar");
+        require(msg.sender == owner, "Only the owner can execute");
         _;
     }
 
-    /// @notice Modificador para verificar si la subasta está activa
+    /// @notice Modifier to check if the auction is active
     modifier onlyWhileActive() {
-        require(block.timestamp >= inicioTiempo, "Subasta no ha iniciado");
-        require(block.timestamp <= tiempoActualizado, "Subasta finalizada");
+        require(block.timestamp >= startTime, "Auction has not started");
+        require(block.timestamp <= timeUpdated, "Auction has ended");
         _;
     }
 
-    /// @notice Modificador para una sola ejecución tras el fin de la subasta
+    /// @notice Modifier for a single execution after the auction ends
     modifier onlyAfterEnd() {
-        require(block.timestamp > tiempoActualizado, "Subasta aun activa");
-        require(!ended, "Subasta ya finalizada");
+        require(block.timestamp > timeUpdated, "Auction is still active");
+        require(!ended, "Auction already finalized");
         _;
     }
 
     /**
-     * @notice Constructor de la subasta
-     * @dev _duration: Duración en segundos desde el inicio hasta el fin inicial
+     * @notice Auction constructor
+     * @dev _duration: Duration in seconds from start to initial end
      */
     constructor(uint256 _duration) {
-        require(_duration > 0, "Duracion invalida"); // Valor siempre superior a 0
+        require(_duration > 0, "Invalid duration"); // Value must be greater than 0
         owner = msg.sender;
-        inicioTiempo = block.timestamp;
-        setTiempoFinal = block.timestamp + _duration;
-        tiempoActualizado = setTiempoFinal;
+        startTime = block.timestamp;
+        setFinalTime = block.timestamp + _duration;
+        timeUpdated = setFinalTime;
     }
 
     /**
-     * @notice Realiza una oferta. La oferta debe superar la oferta más alta actual al menos en 5%.
-     * @notice Si se realiza dentro de los últimos 10 minutos, extiende la subasta por 10 minutos.
+     * @notice Place a bid. The bid must exceed the current highest bid by at least 5%.
+     * @notice If placed within the last 10 minutes, extend the auction by 10 minutes.
      */
-    function ofertar() external payable onlyWhileActive {
-        require(msg.value > 0, "Debe enviar Ether"); // El valor siempre superior a 0
+    function bid() external payable onlyWhileActive {
+        require(msg.value > 0, "Must send Ether"); // Value must be greater than 0
         uint256 currentBid = bids[msg.sender] + msg.value;
-        uint256 minRequired = mayorOferta + (mayorOferta * 5) / 100; // Calcula el 5% de la ultima oferta
+        uint256 minRequired = highBid + (highBid * 5) / 100; // Calculate 5% above the last bid
 
-        // @notice Primera oferta siempre válida
-        if (mayorOferta > 0) {
-            require(currentBid >= minRequired, "Oferta debe superar en al menos 5%");
+        // @notice First bid is always valid
+        if (highBid > 0) {
+            require(currentBid >= minRequired, "Bid must exceed at least 5%");
         }
 
-        //@notice Nuevo ofertante
+        // @notice New bidder
         if (bids[msg.sender] == 0) {
-            ofertantes.push(msg.sender);
+            bidders.push(msg.sender);
         }
 
         bids[msg.sender] = currentBid;
 
-        mayorOferta = currentBid;
-        mayorOfertante = msg.sender;
+        highBid = currentBid;
+        highBidder = msg.sender;
 
-        //@notice Extensión dinámica si estamos a menos de 10 minutos del final
-        if (block.timestamp >= tiempoActualizado - 10 minutes) {
-            tiempoActualizado = block.timestamp + 10 minutes;
+        // @notice Dynamic extension if within 10 minutes of end
+        if (block.timestamp >= timeUpdated - 10 minutes) {
+            timeUpdated = block.timestamp + 10 minutes;
         }
 
-        emit NuevaOferta(msg.sender, currentBid, tiempoActualizado); // emite el evento
-    }
-
-       /**
-    * @notice Permite retirar parte del exceso de depósito durante la subasta.
-    * @param amount: Monto a retirar (debe ser menor o igual al total depositado)
-    */
-    function retirarExcedente(uint256 amount) external onlyWhileActive {
-        uint256 bidAmount = bids[msg.sender];
-        require(bidAmount > 0, "No hay fondos depositados");
-        require(msg.sender != mayorOfertante, "Ganador no puede retirar");
-        require(amount > 0 && amount <= bidAmount, "Monto invalido");
-
-    // @notice Reducimos el deposito del usuario
-    bids[msg.sender] = bidAmount - amount;
-
-    // @notice Transferimos la cantidad solicitada
-    // usamos este metodo para evitar el uso de send o transfer
-    (bool sent, ) = msg.sender.call{value: amount}("");
-    require(sent, "Fallo en el retiro");
+        emit newBid(msg.sender, currentBid, timeUpdated); // Emit the event
     }
 
     /**
-     *  Finaliza la subasta y permite el retiro de depósitos no ganadores con comisión del 2%.
+     * @notice Allows withdrawing part of the bidder’s excess deposit during the auction.
+     * @param amount: Amount to withdraw (must be less than or equal to total deposited)
      */
-    function finalizarSubasta() external onlyAfterEnd {
+    function withdrawExcess(uint256 amount) external onlyWhileActive {
+        uint256 bidAmount = bids[msg.sender];
+        require(bidAmount > 0, "No funds deposited");
+        require(msg.sender != highBidder, "Winner cannot withdraw");
+        require(amount > 0 && amount <= bidAmount, "Invalid amount");
+
+        // @notice Reduce the user's deposit
+        bids[msg.sender] = bidAmount - amount;
+
+        // @notice Transfer the requested amount
+        // Use call to avoid send or transfer
+        (bool sent, ) = msg.sender.call{value: amount}("");
+        require(sent, "Withdrawal failed");
+    }
+
+    /**
+     * @notice Finalizes the auction and allows non-winning bidders to withdraw deposits minus a 2% fee.
+     */
+    function finalizeAuction() external onlyAfterEnd {
         ended = true;
 
-        emit SubastaFinalizada(mayorOfertante, mayorOferta); // emite el evento
+        emit endedBid(highBidder, highBid); // Emit the event
     }
 
     /**
-     *  @notice Permite a ofertantes no ganadores retirar su depósito con un 2% de comisión.
+     * @notice Allows non-winning bidders to withdraw their deposit with a 2% fee.
      */
-    function retirarDeposito() external {
-        require(ended, "Subasta no ha finalizado");
-        require(msg.sender != mayorOfertante, "Ganador no puede retirar aqui");
+    function withdrawDeposit() external {
+        require(ended, "Auction has not ended");
+        require(msg.sender != highBidder, "Winner cannot withdraw here");
 
         uint256 amount = bids[msg.sender];
-        require(amount > 0, "Nada que retirar");
+        require(amount > 0, "Nothing to withdraw");
 
         bids[msg.sender] = 0;
 
@@ -149,51 +149,51 @@ contract Subasta {
         uint256 refund = amount - fee;
 
         (bool sent, ) = msg.sender.call{value: refund}("");
-        require(sent, "Fallo en el reembolso");
+        require(sent, "Refund failed");
     }
 
     /**
-     *  @notice Retorna la lista de todos los ofertantes y sus ofertas.
-     *  @return addresses Array de direcciones de los ofertantes.
-     *  @return amounts Array de montos ofertados por cada dirección.
+     * @notice Returns the list of all bidders and their bids.
+     * @return addresses Array of bidder addresses.
+     * @return amounts Array of bid amounts for each address.
      */
-    function mostrarOfertas() external view returns (address[] memory addresses, uint256[] memory amounts) {
-        uint256 len = ofertantes.length;
+    function showBids() external view returns (address[] memory addresses, uint256[] memory amounts) {
+        uint256 len = bidders.length;
         addresses = new address[](len);
         amounts = new uint256[](len);
 
         for (uint256 i = 0; i < len; ++i) {
-            address ofertante = ofertantes[i];
-            addresses[i] = ofertante;
-            amounts[i] = bids[ofertante];
+            address bidder = bidders[i];
+            addresses[i] = bidder;
+            amounts[i] = bids[bidder];
         }
     }
 
     /**
-     *  @notice Retorna el ganador actual y la oferta ganadora
-     *  @return ganador Dirección del ofertante con la oferta más alta
-     *  @return oferta Monto de la oferta más alta
+     * @notice Returns the current winner and the winning bid.
+     * @return winner Address of the bidder with the highest bid
+     * @return amount Amount of the highest bid
      */
-    function mostrarGanador() external view returns (address ganador, uint256 oferta) {
-        return (mayorOfertante, mayorOferta);
+    function showWinner() external view returns (address winner, uint256 amount) {
+        return (highBidder, highBid);
     }
 
- /**
-     * @notice Retorna el número de ofertantes únicos
-     * @return count Número de participantes únicos
+    /**
+     * @notice Returns the number of unique bidders.
+     * @return count Number of unique participants
      */
-    function numeroDeOfertantes() external view returns (uint256) {
-        return ofertantes.length;
+    function numbidders() external view returns (uint256) {
+        return bidders.length;
     }
 
-   /**
-     * @dev Rechaza depósitos directos a menos que sea mediante la función ofertar().
+    /**
+     * @dev Rejects direct deposits unless via the bid() function.
      */
     fallback() external payable {
-        revert("Usa ofertar()"); // Siempre usar Ofertar para poder controlar mejor
+        revert("Use bid()"); // Always use bid() for better control
     }
 
     receive() external payable {
-        revert("Usa ofertar()"); // Siempre usar Ofertar para poder controlar mejor
+        revert("Use bid()"); // Always use bid() for better control
     }
 }
