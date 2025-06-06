@@ -1,4 +1,3 @@
-
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
@@ -7,15 +6,15 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 /**
  * @title Simple Auction with Auto-Extension and Partial Refunds
  * @author Hipolito Alonso
- * @notice Implements a basic auction where users can place bids.
- *         If a bid is placed near the end, the auction is extended.
- *         Losing bidders can withdraw their ETH minus a small fee.
- *         As Cristian's request, the code is written in English 
- *         to improve its readability and comprehension.
- *         Also import OpenZeppeling Library for Reentrancy Protection as we saw
- *         in the last meet          
+ * @notice Implements a basic ETH auction where users can place bids, 
+ *         with auto-extension if a bid is placed in the last 10 minutes, 
+ *         and a partial refund mechanism for losing bidders.
+ * @dev    This version of the auction implements the OpenZeppelin library 
+ *         and features complete code optimization. As we saw in the 5/6 class
+ *         we can save a lot of code by effectively utilizing programming logic.
  */
-contract Auction is ReentrancyGuard { 
+
+contract AuctionTP is ReentrancyGuard { 
     address public owner; // Owner address
     uint256 public startTime; // Start time in seconds
     uint256 public endTime; // End time in seconds (starts + duration)
