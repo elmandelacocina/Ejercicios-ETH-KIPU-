@@ -18,7 +18,7 @@ pragma solidity ^0.8.0;
  *      from approximately 250 lines to around 150 lines.
  */
 
-contract Auctionv3 {
+contract Auctionv2 {
     // @notice Address of the auction owner
     address public immutable owner;
 
