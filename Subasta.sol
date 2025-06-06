@@ -4,7 +4,7 @@ pragma solidity ^0.8.0;
 
 // @title Subasta Dinámica con Extensión y Reembolsos Parciales
 // @notice Permite ofertar por un artículo, extendiendo el tiempo final con cada nueva oferta válida.
-//*
+/*
 * @notice Esta es la primer version que hice en español porque no sabia que se codeaba todo en ingles
 * Gracias a esto igual pude revisar todo el codigo y despues de dos clases pude mejorar sustancialmente 
 * el codigo del contrato, ademas de en la ultima clase aprender a importar librerias como la de OpenZeppelin
