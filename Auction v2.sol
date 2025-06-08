@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
@@ -12,6 +12,17 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
  * @dev    This version of the auction implements the OpenZeppelin library 
  *         and features complete code optimization. As we saw in the 5/6 class
  *         we can save a lot of code by effectively utilizing programming logic.
+ *         Also I hace previus version of this contract, the first that is all in spanish
+ *         and the second that has a Reentrancy checker, made it by myself
+   
+    modifier nonReentrant() {
+        require(!locked, "Reentrancy detected");
+        locked = true;
+        _;
+        locked = false;
+    }
+    This was made before the last meet, when we see how to implement OpenZeppelin
+
  */
 
 contract AuctionTP is ReentrancyGuard { 
