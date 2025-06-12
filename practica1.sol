@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-//impleStorage
+// SimpleStorage
 // Contrato que permite almacenar y recuperar un valor entero positivo
 contract SimpleStorage {
     // Variable privada para almacenar el valor

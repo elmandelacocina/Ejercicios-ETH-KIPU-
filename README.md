@@ -35,3 +35,6 @@ Example:
 
 ```solidity
 new Auction(3600); // 1-hour auction
+```
+
+The auction duration is specified in seconds. Once deployed, bidders can start placing bids immediately.
