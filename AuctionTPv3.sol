@@ -6,7 +6,6 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 /// @title AuctionTP - ETH auction with auto-extension, secure withdrawals, and fee system
 /// @author Hipolito Alonso
 /// @notice Secure and extensible ETH auction contract with auto-extension and refund mechanism
-/// @dev Uses OpenZeppelin's ReentrancyGuard. Optimized for clarity and safety
 contract AuctionTP is ReentrancyGuard {
     address public immutable owner;
     uint256 public immutable startTime;
