@@ -3,72 +3,55 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 
-/// @title AuctionTP - ETH auction with auto-extension, secure withdrawals and fee system
+/// @title AuctionTP - ETH auction with auto-extension, secure withdrawals, and fee system
 /// @author Hipolito Alonso
 /// @notice Secure and extensible ETH auction contract with auto-extension and refund mechanism
-/// @dev Uses OpenZeppelin's ReentrancyGuard. Optimized for gas and secure access control.
+/// @dev Uses OpenZeppelin's ReentrancyGuard. Optimized for clarity and safety
 contract AuctionTP is ReentrancyGuard {
-    /// @notice Address of the contract owner
     address public immutable owner;
-
-    /// @notice Auction start timestamp
     uint256 public immutable startTime;
-
-    /// @notice Auction end timestamp
     uint256 public endTime;
-
-    /// @notice Current highest bidder
     address public highestBidder;
-
-    /// @notice Current highest bid amount
     uint256 public highestBid;
 
-    /// @notice Fee percentage taken from losing bids (2%)
     uint256 public constant FEE_PERCENT = 2;
-
-    /// @notice Minimum percentage increment required to outbid (5%)
     uint256 public constant MIN_INCREMENT_PERCENT = 5;
-
-    /// @notice Time added if bid is near auction end
     uint256 public constant EXTEND_TIME = 10 minutes;
-
-    /// @notice Time window before auction end to trigger extension
     uint256 public constant EXTEND_WINDOW = 10 minutes;
 
-    /// @notice List of all bidders (used for mass refunds)
     address[] public bidders;
-
-    /// @notice Mapping of address to total amount bid
     mapping(address => uint256) public balances;
 
-    /// @notice Prevents duplicate bidder entries in `bidders`
-    mapping(address => bool) internal _hasBid;
+    /// @notice Enum representing bidder participation
+    enum ParticipationStatus { NotEntered, Entered }
 
-    /// @notice Enum for auction status
+    /// @notice Tracks each address's status
+    mapping(address => ParticipationStatus) internal participationStatus;
+
     enum AuctionStatus { Ongoing, Ended }
-
-    /// @notice Current auction state
     AuctionStatus public status;
 
-    /// @notice Emitted when a new bid is placed
     event NewBid(address indexed bidder, uint256 amount, uint256 newEndTime);
-
-    /// @notice Emitted when the auction is finalized
     event AuctionEnded(address indexed winner, uint256 amount);
-
-    /// @notice Emitted when a losing bidder withdraws funds
     event Withdrawal(address indexed bidder, uint256 refund, uint256 fee);
-
-    /// @notice Emitted when a partial withdrawal is made
     event PartialWithdrawal(address indexed bidder, uint256 requested, uint256 refunded, uint256 fee);
-
-    /// @notice Emitted when the owner withdraws remaining contract funds
     event EmergencyWithdraw(address indexed to, uint256 amount);
 
-    /// @notice Initializes the auction with a given duration
-    /// @param durationSeconds Duration of the auction in seconds
+    modifier onlyWhileOngoing() {
+        require(status == AuctionStatus.Ongoing, "auction ended");
+        require(block.timestamp >= startTime && block.timestamp < endTime, "not in bidding window");
+        _;
+    }
+
+    modifier onlyWhenEnded() {
+        require(block.timestamp > endTime, "auction not ended");
+        _;
+    }
+
+    /// @notice Initializes the auction with duration
+    /// @param durationSeconds Auction duration in seconds
     constructor(uint256 durationSeconds) {
-        require(durationSeconds > 0, "dur=0");
+        require(durationSeconds > 0, "invalid duration");
         owner = msg.sender;
         startTime = block.timestamp;
         endTime = block.timestamp + durationSeconds;
@@ -76,100 +59,94 @@ contract AuctionTP is ReentrancyGuard {
     }
 
     /// @notice Place or increase a bid
-    /// @dev Adds sender to bidders list if first bid. Enforces minimum increment.
-    function bid() external payable {
-        uint256 nowTime = block.timestamp;
-        require(status == AuctionStatus.Ongoing, "not active");
-        require(nowTime >= startTime, "not started");
-        require(nowTime < endTime, "ended");
-        require(msg.value > 0, "no eth");
+    /// @dev Extends auction if bid is near end
+    function bid() external payable onlyWhileOngoing {
+        address sender = msg.sender;
+        uint256 value = msg.value;
+        require(value > 0, "no ETH sent");
 
-        if (!_hasBid[msg.sender]) {
-            _hasBid[msg.sender] = true;
-            bidders.push(msg.sender);
+        if (participationStatus[sender] == ParticipationStatus.NotEntered) {
+            participationStatus[sender] = ParticipationStatus.Entered;
+            bidders.push(sender);
         }
 
-        uint256 newBalance = balances[msg.sender] + msg.value;
-        balances[msg.sender] = newBalance;
+        uint256 newBalance = balances[sender] + value;
+        require(
+            highestBid == 0 || newBalance >= highestBid + (highestBid * MIN_INCREMENT_PERCENT) / 100,
+            "bid too low"
+        );
 
-        if (highestBid > 0) {
-            uint256 minRequired = highestBid + (highestBid * MIN_INCREMENT_PERCENT) / 100;
-            require(newBalance >= minRequired, "bid < min");
-        }
-
+        balances[sender] = newBalance;
         highestBid = newBalance;
-        highestBidder = msg.sender;
+        highestBidder = sender;
 
-        if (nowTime + EXTEND_WINDOW >= endTime) {
-            endTime = nowTime + EXTEND_TIME;
+        if (block.timestamp + EXTEND_WINDOW >= endTime) {
+            endTime = block.timestamp + EXTEND_TIME;
         }
 
-        emit NewBid(msg.sender, newBalance, endTime);
+        emit NewBid(sender, newBalance, endTime);
     }
 
-    /// @notice Finalizes auction and sends winning bid to the owner
-    /// @dev Only callable by the owner. Can only be called once.
-    function finalize() external nonReentrant {
+    /// @notice Finalize the auction and transfer funds to owner
+    function finalize() external nonReentrant onlyWhenEnded {
         require(msg.sender == owner, "not owner");
-        require(block.timestamp > endTime, "ongoing");
-        require(status == AuctionStatus.Ongoing, "finalized");
 
         status = AuctionStatus.Ended;
-
+        address winner = highestBidder;
         uint256 amount = highestBid;
-        balances[highestBidder] = 0;
+
+        balances[winner] = 0;
 
         (bool sent, ) = payable(owner).call{value: amount}("");
-        require(sent, "fail send");
+        require(sent, "send failed");
 
-        emit AuctionEnded(highestBidder, amount);
+        emit AuctionEnded(winner, amount);
     }
 
-    /// @notice Allows losing bidders to withdraw their full bid minus fee
-    function withdraw() external nonReentrant {
+    /// @notice Withdraws full balance for losing bidders
+    function withdraw() external nonReentrant onlyWhenEnded {
         address sender = msg.sender;
-        require(block.timestamp > endTime, "not ended");
-        require(sender != highestBidder, "winner");
-
+        address winner = highestBidder;
         uint256 balance = balances[sender];
-        require(balance > 0, "no funds");
+
+        require(sender != winner && balance > 0, "invalid withdrawal");
 
         balances[sender] = 0;
+
         uint256 fee = (balance * FEE_PERCENT) / 100;
         uint256 refund = balance - fee;
 
         (bool sent, ) = payable(sender).call{value: refund}("");
-        require(sent, "fail send");
+        require(sent, "send failed");
 
         emit Withdrawal(sender, refund, fee);
     }
 
-    /// @notice Allows partial withdrawal of a losing bid
-    /// @param amount Amount to withdraw
-    function withdrawPartial(uint256 amount) external nonReentrant {
+    /// @notice Withdraws a partial amount for losing bidders
+    /// @param amount The amount to withdraw
+    function withdrawPartial(uint256 amount) external nonReentrant onlyWhenEnded {
         address sender = msg.sender;
-        require(block.timestamp > endTime, "not ended");
-        require(sender != highestBidder, "winner");
-        require(amount > 0, "0 amt");
+        address winner = highestBidder;
 
-        uint256 balance = balances[sender];
-        require(balance >= amount, "insuf bal");
+        require(sender != winner, "winner can't withdraw");
+        require(amount > 0, "amount zero");
 
-        balances[sender] = balance - amount;
+        uint256 senderBalance = balances[sender];
+        require(amount <= senderBalance, "amount exceeds balance");
+
+        balances[sender] = senderBalance - amount;
+
         uint256 fee = (amount * FEE_PERCENT) / 100;
         uint256 refund = amount - fee;
 
         (bool sent, ) = payable(sender).call{value: refund}("");
-        require(sent, "fail send");
+        require(sent, "send failed");
 
         emit PartialWithdrawal(sender, amount, refund, fee);
     }
 
-    /// @notice Refunds all losing bidders minus fee
-    /// @dev Optimized for gas, skips winner
-    function distributeLosingBids() external nonReentrant {
-        require(block.timestamp > endTime, "not ended");
-
+    /// @notice Refunds all losing bidders after auction ends
+    function distributeLosingBids() external nonReentrant onlyWhenEnded {
         address winner = highestBidder;
         uint256 len = bidders.length;
 
@@ -186,32 +163,31 @@ contract AuctionTP is ReentrancyGuard {
             uint256 refund = balance - fee;
 
             (bool sent, ) = payable(bidder).call{value: refund}("");
-            require(sent, "fail send");
+            require(sent, "send failed");
 
             emit Withdrawal(bidder, refund, fee);
         }
     }
 
-    /// @notice Allows the owner to recover stuck ETH after auction ends
-    function emergencyWithdraw() external nonReentrant {
+    /// @notice Emergency withdrawal of remaining ETH
+    function emergencyWithdraw() external nonReentrant onlyWhenEnded {
         require(msg.sender == owner, "not owner");
-        require(block.timestamp > endTime, "not ended");
 
         uint256 contractBalance = address(this).balance;
-        require(contractBalance > 0, "no eth");
+        require(contractBalance > 0, "no ETH");
 
         (bool sent, ) = payable(owner).call{value: contractBalance}("");
-        require(sent, "fail send");
+        require(sent, "send failed");
 
         emit EmergencyWithdraw(owner, contractBalance);
     }
 
-    /// @notice Reject ETH sent directly to the contract
+    /// @notice Rejects direct ETH transfers
     receive() external payable {
         revert("use bid()");
     }
 
-    /// @notice Reject fallback function calls
+    /// @notice Rejects unexpected function calls
     fallback() external payable {
         revert("use bid()");
     }
